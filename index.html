@@ -1,0 +1,2146 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <!-- スマホアプリ用メタタグ（PWA） -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#ef4444">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>血圧手帳</title>
+    
+    <!-- 動的Manifest用のリンク -->
+    <link rel="manifest" id="manifest-link">
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', 'Noto Sans JP', sans-serif;
+            background-color: #f1f5f9; /* bg-slate-100 */
+            -webkit-tap-highlight-color: transparent;
+        }
+        /* モーダルのスライドアニメーション */
+        .modal-enter { transform: translateY(100%); opacity: 0; }
+        .modal-enter-active { transform: translateY(0); opacity: 1; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        .modal-exit { transform: translateY(0); opacity: 1; }
+        .modal-exit-active { transform: translateY(100%); opacity: 0; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        
+        /* スクロールバー非表示 */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body class="text-slate-800 antialiased min-h-screen flex flex-col pb-24 relative overflow-x-hidden">
+
+    <!-- トースト通知 -->
+    <div id="toast" class="fixed top-4 left-1/2 -translate-x-1/2 z-50 pointer-events-none transition-all duration-300 transform -translate-y-20 opacity-0 w-11/12 max-w-sm">
+        <div class="bg-slate-900/90 backdrop-blur-sm text-white text-xs font-bold py-2.5 px-4 rounded-xl shadow-lg flex items-center justify-center gap-2 border border-slate-700">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-emerald-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+            </svg>
+            <span id="toast-message" class="truncate"></span>
+        </div>
+    </div>
+
+    <!-- ヘッダー -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-20 shadow-xs">
+        <div class="max-w-md mx-auto px-4 py-3 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <div class="bg-rose-500 text-white p-1.5 rounded-lg shadow-sm">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z" clip-rule="evenodd" />
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-lg font-black text-slate-900 tracking-tight leading-tight">血圧手帳</h1>
+                </div>
+            </div>
+            <div class="flex items-center gap-1.5">
+                <!-- 同期バッジ -->
+                <div id="sync-status" class="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full bg-emerald-100 text-emerald-700">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>保存済み
+                </div>
+                <!-- CSV出力ボタン -->
+                <button onclick="exportRecordsToCsv()" title="CSV出力" class="p-1.5 text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition active:scale-95 flex items-center gap-1 text-xs font-bold px-2.5">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    <span>CSV</span>
+                </button>
+                <!-- 設定ボタン -->
+                <button onclick="openSettingsModal()" title="AI設定（任意）" class="p-1.5 text-slate-500 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-lg transition active:scale-95">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- メインコンテンツ -->
+    <main class="flex-1 w-full max-w-md mx-auto px-4 py-4 space-y-4">
+        
+        <!-- クイック写真入力カード -->
+        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+            <label class="flex items-center justify-center gap-3 w-full py-3.5 px-4 bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-600 hover:to-blue-700 text-white rounded-xl shadow-md shadow-sky-200 cursor-pointer active:scale-95 transition">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                <div class="text-left">
+                    <div class="text-sm font-bold leading-tight">写真から日時・数値を自動入力</div>
+                    <div class="text-[10px] text-sky-100">カメラ撮影・ライブラリから7セグ解析</div>
+                </div>
+                <input type="file" accept="image/*" onchange="openModalAndProcessPhoto(event)" class="hidden">
+            </label>
+        </div>
+
+        <!-- サマリー（平均値カード） -->
+        <div class="grid grid-cols-3 gap-2.5">
+            <div class="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs text-center">
+                <div class="text-[10px] font-bold text-slate-400 mb-0.5">平均 最高</div>
+                <div class="flex items-baseline justify-center gap-0.5">
+                    <span id="stat-sys" class="text-2xl font-black text-rose-600">-</span>
+                    <span class="text-[10px] text-slate-400 font-bold">mmHg</span>
+                </div>
+            </div>
+            <div class="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs text-center">
+                <div class="text-[10px] font-bold text-slate-400 mb-0.5">平均 最低</div>
+                <div class="flex items-baseline justify-center gap-0.5">
+                    <span id="stat-dia" class="text-2xl font-black text-sky-600">-</span>
+                    <span class="text-[10px] text-slate-400 font-bold">mmHg</span>
+                </div>
+            </div>
+            <div class="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs text-center">
+                <div class="text-[10px] font-bold text-slate-400 mb-0.5">平均 脈拍</div>
+                <div class="flex items-baseline justify-center gap-0.5">
+                    <span id="stat-pulse" class="text-2xl font-black text-emerald-600">-</span>
+                    <span class="text-[10px] text-slate-400 font-bold">bpm</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 記録ヘッダー -->
+        <div class="flex items-center justify-between pt-1">
+            <h2 class="text-sm font-bold text-slate-700 flex items-center gap-1.5">
+                <span>測定履歴</span>
+                <span id="record-count" class="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">0件</span>
+            </h2>
+            <button onclick="exportRecordsToCsv()" class="text-xs font-bold text-sky-600 hover:text-sky-700 flex items-center gap-1 transition">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                CSVエクスポート
+            </button>
+        </div>
+
+        <!-- 記録リスト (カード形式) -->
+        <div id="record-list" class="space-y-2.5">
+            <!-- JavaScriptで動的生成 -->
+        </div>
+    </main>
+
+    <!-- Floating Action Button (FAB) -->
+    <button onclick="openModal()" aria-label="新規記録を追加" class="fixed bottom-6 right-6 w-14 h-14 bg-rose-500 text-white rounded-full shadow-xl shadow-rose-300 hover:bg-rose-600 hover:scale-105 active:scale-95 transition-all flex items-center justify-center z-30">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+        </svg>
+    </button>
+
+    <!-- 入力モーダル (Bottom Sheet風) -->
+    <div id="add-modal" class="fixed inset-0 z-50 hidden flex-col justify-end">
+        <!-- 背景オーバーレイ -->
+        <div id="modal-backdrop" class="absolute inset-0 bg-slate-900/60 opacity-0 transition-opacity" onclick="closeModal()"></div>
+        
+        <!-- モーダル本体 -->
+        <div id="modal-content" class="bg-white w-full max-w-md mx-auto rounded-t-3xl shadow-2xl relative z-10 modal-enter max-h-[92vh] flex flex-col">
+            <!-- モーダルヘッダー -->
+            <div class="p-4 pb-2 border-b border-slate-100 flex justify-between items-center shrink-0">
+                <div class="flex items-center gap-2">
+                    <span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
+                    <h2 class="text-base font-bold text-slate-800">新しい血圧記録</h2>
+                </div>
+                <button onclick="closeModal()" class="p-1.5 text-slate-400 hover:text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-full transition">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+                    </svg>
+                </button>
+            </div>
+
+            <!-- スクロール可能ボディ -->
+            <div class="p-4 overflow-y-auto space-y-4 flex-1">
+                
+                <!-- 写真入力ボタン -->
+                <label class="flex flex-col items-center justify-center w-full py-3.5 border-2 border-dashed border-sky-300 rounded-2xl bg-sky-50 text-sky-700 hover:bg-sky-100 transition cursor-pointer active:scale-98">
+                    <div class="flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-sky-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                        <span id="photo-btn-text" class="text-sm font-bold">写真から数値を自動読み取り</span>
+                    </div>
+                    <span class="text-[10px] text-sky-500 mt-0.5">液晶を写すと日時と数値を自動抽出します</span>
+                    <input type="file" accept="image/*" onchange="processPhoto(event)" class="hidden">
+                </label>
+
+                <!-- 【機能1】写真選択時の元写真プレビュー＆拡大（ピンチ操作/ズームボタン） -->
+                <div id="photo-ref-container" class="hidden rounded-2xl overflow-hidden border border-slate-700 shadow-md bg-slate-900 transition-all">
+                    <!-- ツールバー -->
+                    <div class="px-3 py-2 bg-slate-800 text-white flex items-center justify-between border-b border-slate-700 text-xs">
+                        <div class="flex items-center gap-1.5 font-bold text-slate-200">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-sky-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7" />
+                            </svg>
+                            <span>元写真プレビュー</span>
+                            <span id="photo-zoom-level" class="text-[10px] px-1.5 py-0.5 rounded bg-sky-900 text-sky-300 font-mono font-bold">1.0x</span>
+                        </div>
+                        <!-- 拡大操作ボタン群（1x, 1.5x, 2x, リセット） -->
+                        <div class="flex items-center gap-1">
+                            <button type="button" onclick="setPhotoZoom(1.0)" class="zoom-preset-btn px-2 py-1 rounded bg-sky-600 text-white text-[11px] font-bold transition" data-zoom="1">1x</button>
+                            <button type="button" onclick="setPhotoZoom(1.5)" class="zoom-preset-btn px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-200 text-[11px] font-bold transition" data-zoom="1.5">1.5x</button>
+                            <button type="button" onclick="setPhotoZoom(2.0)" class="zoom-preset-btn px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-200 text-[11px] font-bold transition" data-zoom="2">2x</button>
+                            <button type="button" onclick="resetPhotoZoom()" title="表示をリセット" class="p-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-300 transition">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <!-- ビューポート（タッチでピンチ＆ドラッグ対応） -->
+                    <div id="photo-viewport" class="relative w-full h-52 bg-slate-950 overflow-hidden cursor-grab active:cursor-grabbing select-none flex items-center justify-center touch-none">
+                        <img id="photo-ref-img" src="" alt="血圧計写真プレビュー" class="max-w-none max-h-none select-none pointer-events-none origin-center" style="transform: translate(0px, 0px) scale(1);" />
+                        <div class="absolute bottom-1.5 right-2 pointer-events-none text-[10px] text-slate-300 bg-slate-900/80 px-2 py-0.5 rounded-full backdrop-blur-xs border border-slate-700">
+                            ピンチ操作 / ドラッグで移動
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 解析結果・ステータス表示エリア -->
+                <div id="ai-status-box" class="hidden p-3 rounded-2xl text-xs border transition-all">
+                    <div id="ai-status-title" class="font-bold mb-1"></div>
+                    <div id="ai-status-detail" class="opacity-90 break-words whitespace-pre-line text-[11px] leading-relaxed"></div>
+                    <div id="debug-preview-wrap" class="hidden mt-2 pt-2 border-t border-slate-200/60">
+                        <div class="text-[10px] font-bold mb-1 text-slate-600">LCD自動検出・枠線除去・7セグ隙間補正画像:</div>
+                        <img id="debug-preview-img" class="max-h-24 rounded border border-slate-300 mx-auto bg-white shadow-2xs" alt="加工後プレビュー">
+                    </div>
+                </div>
+
+                <!-- 入力フォーム -->
+                <form id="add-form" onsubmit="addRecord(event)" class="space-y-3.5">
+                    
+                    <!-- 日時入力 -->
+                    <div class="grid grid-cols-2 gap-2 bg-slate-50 p-2.5 rounded-2xl border border-slate-200">
+                        <div>
+                            <label class="block text-[10px] font-bold text-slate-500 mb-1">測定日</label>
+                            <input type="date" id="input-date" required class="w-full text-xs font-bold text-slate-800 bg-white p-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-400">
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-slate-500 mb-1">測定時刻</label>
+                            <input type="time" id="input-time" required class="w-full text-xs font-bold text-slate-800 bg-white p-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-400">
+                        </div>
+                    </div>
+
+                    <!-- 【機能2】最高血圧入力欄 ＋ ワンタップ微調整ボタン（-1 / +1） -->
+                    <div class="bg-rose-50/50 p-3 rounded-2xl border border-rose-100">
+                        <div class="flex items-center justify-between mb-1">
+                            <label for="input-sys" class="text-xs font-bold text-rose-950 flex items-center gap-1.5">
+                                <span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span>最高血圧 (SYS)
+                            </label>
+                            <span class="text-[10px] font-bold text-rose-400">mmHg</span>
+                        </div>
+                        <input type="number" id="input-sys" required placeholder="120" min="30" max="300" class="w-full text-center text-3xl font-black text-rose-600 py-1.5 px-3 bg-white rounded-xl border border-rose-200 focus:outline-none focus:ring-2 focus:ring-rose-400 shadow-2xs">
+                        
+                        <!-- 微調整ボタン -->
+                        <div class="flex items-center justify-center gap-2 mt-2">
+                            <button type="button" onclick="adjustValue('input-sys', -5)" class="px-3 py-1.5 text-xs font-bold text-slate-600 bg-white hover:bg-slate-100 active:scale-95 border border-slate-200 rounded-lg shadow-2xs transition">-5</button>
+                            <button type="button" onclick="adjustValue('input-sys', -1)" class="flex-1 py-1.5 text-xs font-black text-rose-700 bg-white hover:bg-rose-100 active:scale-95 border border-rose-300 rounded-lg shadow-2xs transition flex items-center justify-center gap-1">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M20 12H4"/></svg>
+                                <span>-1</span>
+                            </button>
+                            <button type="button" onclick="adjustValue('input-sys', 1)" class="flex-1 py-1.5 text-xs font-black text-rose-700 bg-white hover:bg-rose-100 active:scale-95 border border-rose-300 rounded-lg shadow-2xs transition flex items-center justify-center gap-1">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
+                                <span>+1</span>
+                            </button>
+                            <button type="button" onclick="adjustValue('input-sys', 5)" class="px-3 py-1.5 text-xs font-bold text-slate-600 bg-white hover:bg-slate-100 active:scale-95 border border-slate-200 rounded-lg shadow-2xs transition">+5</button>
+                        </div>
+                    </div>
+
+                    <!-- 【機能2】最低血圧入力欄 ＋ ワンタップ微調整ボタン（-1 / +1） -->
+                    <div class="bg-sky-50/50 p-3 rounded-2xl border border-sky-100">
+                        <div class="flex items-center justify-between mb-1">
+                            <label for="input-dia" class="text-xs font-bold text-sky-950 flex items-center gap-1.5">
+                                <span class="w-2.5 h-2.5 rounded-full bg-sky-500"></span>最低血圧 (DIA)
+                            </label>
+                            <span class="text-[10px] font-bold text-sky-400">mmHg</span>
+                        </div>
+                        <input type="number" id="input-dia" required placeholder="80" min="30" max="250" class="w-full text-center text-3xl font-black text-sky-600 py-1.5 px-3 bg-white rounded-xl border border-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-400 shadow-2xs">
+                        
+                        <!-- 微調整ボタン -->
+                        <div class="flex items-center justify-center gap-2 mt-2">
+                            <button type="button" onclick="adjustValue('input-dia', -5)" class="px-3 py-1.5 text-xs font-bold text-slate-600 bg-white hover:bg-slate-100 active:scale-95 border border-slate-200 rounded-lg shadow-2xs transition">-5</button>
+                            <button type="button" onclick="adjustValue('input-dia', -1)" class="flex-1 py-1.5 text-xs font-black text-sky-700 bg-white hover:bg-sky-100 active:scale-95 border border-sky-300 rounded-lg shadow-2xs transition flex items-center justify-center gap-1">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M20 12H4"/></svg>
+                                <span>-1</span>
+                            </button>
+                            <button type="button" onclick="adjustValue('input-dia', 1)" class="flex-1 py-1.5 text-xs font-black text-sky-700 bg-white hover:bg-sky-100 active:scale-95 border border-sky-300 rounded-lg shadow-2xs transition flex items-center justify-center gap-1">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
+                                <span>+1</span>
+                            </button>
+                            <button type="button" onclick="adjustValue('input-dia', 5)" class="px-3 py-1.5 text-xs font-bold text-slate-600 bg-white hover:bg-slate-100 active:scale-95 border border-slate-200 rounded-lg shadow-2xs transition">+5</button>
+                        </div>
+                    </div>
+
+                    <!-- 【機能2】脈拍入力欄 ＋ ワンタップ微調整ボタン（-1 / +1） -->
+                    <div class="bg-emerald-50/50 p-3 rounded-2xl border border-emerald-100">
+                        <div class="flex items-center justify-between mb-1">
+                            <label for="input-pulse" class="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
+                                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>脈拍 (PULSE)
+                            </label>
+                            <span class="text-[10px] font-bold text-emerald-400">bpm</span>
+                        </div>
+                        <input type="number" id="input-pulse" required placeholder="70" min="30" max="250" class="w-full text-center text-3xl font-black text-emerald-600 py-1.5 px-3 bg-white rounded-xl border border-emerald-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 shadow-2xs">
+                        
+                        <!-- 微調整ボタン -->
+                        <div class="flex items-center justify-center gap-2 mt-2">
+                            <button type="button" onclick="adjustValue('input-pulse', -5)" class="px-3 py-1.5 text-xs font-bold text-slate-600 bg-white hover:bg-slate-100 active:scale-95 border border-slate-200 rounded-lg shadow-2xs transition">-5</button>
+                            <button type="button" onclick="adjustValue('input-pulse', -1)" class="flex-1 py-1.5 text-xs font-black text-emerald-700 bg-white hover:bg-emerald-100 active:scale-95 border border-emerald-300 rounded-lg shadow-2xs transition flex items-center justify-center gap-1">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M20 12H4"/></svg>
+                                <span>-1</span>
+                            </button>
+                            <button type="button" onclick="adjustValue('input-pulse', 1)" class="flex-1 py-1.5 text-xs font-black text-emerald-700 bg-white hover:bg-emerald-100 active:scale-95 border border-emerald-300 rounded-lg shadow-2xs transition flex items-center justify-center gap-1">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
+                                <span>+1</span>
+                            </button>
+                            <button type="button" onclick="adjustValue('input-pulse', 5)" class="px-3 py-1.5 text-xs font-bold text-slate-600 bg-white hover:bg-slate-100 active:scale-95 border border-slate-200 rounded-lg shadow-2xs transition">+5</button>
+                        </div>
+                    </div>
+
+                    <!-- メモ入力 -->
+                    <div>
+                        <label for="input-memo" class="block text-[10px] font-bold text-slate-500 mb-1">メモ（任意）</label>
+                        <input type="text" id="input-memo" placeholder="朝の測定、服薬後、運動後など" class="w-full text-xs text-slate-800 bg-slate-50 p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-400">
+                    </div>
+
+                    <!-- 保存ボタン -->
+                    <button type="submit" class="w-full py-3.5 px-4 bg-rose-500 hover:bg-rose-600 active:scale-98 text-white font-bold rounded-2xl shadow-lg shadow-rose-200 transition">
+                        この記録を保存する
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 設定モーダル（Gemini API設定） -->
+    <div id="settings-modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4">
+        <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-2xs" onclick="closeSettingsModal()"></div>
+        <div class="bg-white rounded-3xl max-w-sm w-full p-5 relative z-10 shadow-2xl space-y-4">
+            <div class="flex items-center justify-between">
+                <h3 class="text-base font-bold text-slate-800 flex items-center gap-2">
+                    <span class="p-1.5 bg-sky-100 text-sky-600 rounded-lg">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                    </span>
+                    AI読み取り設定
+                </h3>
+                <button onclick="closeSettingsModal()" class="p-1 text-slate-400 hover:text-slate-600 rounded-full">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
+                </button>
+            </div>
+            <p class="text-xs text-slate-500 leading-relaxed">
+                Gemini APIキーを設定すると、クラウドAIでより高精度に読み取ることができます。<br>
+                <span class="text-emerald-600 font-bold">※空欄のままでも、オムロン血圧計専用の画像前処理（照明反射除去・セグメント隙間補完・固定ROI分割）と高精度7セグ解析が自動で動作します。</span>
+            </p>
+            <div>
+                <label class="block text-[10px] font-bold text-slate-600 mb-1">Gemini API Key（任意）</label>
+                <input type="password" id="gemini-api-key-input" placeholder="AIzaSy..." class="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-400 font-mono">
+            </div>
+            <div class="flex gap-2 pt-2">
+                <button type="button" onclick="closeSettingsModal()" class="flex-1 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition">キャンセル</button>
+                <button type="button" onclick="saveApiKey()" class="flex-1 py-2 text-xs font-bold text-white bg-sky-500 hover:bg-sky-600 rounded-xl shadow transition">保存する</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript ロジック -->
+    <script>
+        // ==========================================
+        // PWA Setup
+        // ==========================================
+        function setupPWA() {
+            try {
+                const manifest = {
+                    name: "血圧手帳",
+                    short_name: "血圧手帳",
+                    start_url: "./",
+                    display: "standalone",
+                    background_color: "#f1f5f9",
+                    theme_color: "#ef4444",
+                    icons: [
+                        {
+                            src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23ef4444'/%3E%3Cpath d='M50 30 C30 15 15 35 30 55 L50 75 L70 55 C85 35 70 15 50 30 Z' fill='white'/%3E%3C/svg%3E",
+                            sizes: "192x192 512x512",
+                            type: "image/svg+xml"
+                        }
+                    ]
+                };
+                const blob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
+                const manifestUrl = URL.createObjectURL(blob);
+                const link = document.getElementById('manifest-link');
+                if (link) link.setAttribute('href', manifestUrl);
+            } catch (e) {
+                console.warn('PWA setup skipped:', e);
+            }
+        }
+        setupPWA();
+
+        // ==========================================
+        // データ管理 & localStorage (維持項目)
+        // ==========================================
+        const defaultRecords = [
+            { id: '1', date: '2026-11-14', time: '19:23', sys: 114, dia: 80, pulse: 67, memo: 'オムロン血圧計' },
+            { id: '2', date: '2026-11-15', time: '06:40', sys: 115, dia: 72, pulse: 58, memo: '朝の測定' }
+        ];
+
+        let records = [];
+
+        function updateSyncStatus(state, text) {
+            const el = document.getElementById('sync-status');
+            if (!el) return;
+            if (state === 'saved') {
+                el.className = 'inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full bg-emerald-100 text-emerald-700';
+                el.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>${text}`;
+            } else if (state === 'saving') {
+                el.className = 'inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full bg-sky-100 text-sky-700';
+                el.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-sky-500 animate-pulse"></span>${text}`;
+            } else {
+                el.className = 'inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full bg-amber-100 text-amber-700';
+                el.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>${text}`;
+            }
+        }
+
+        function loadRecordsFromStorage() {
+            try {
+                const saved = localStorage.getItem('bp_records') || localStorage.getItem('blood_pressure_records');
+                if (saved) {
+                    const parsed = JSON.parse(saved);
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                        records = parsed;
+                        return;
+                    }
+                }
+            } catch (e) {
+                console.warn('Failed to parse localStorage bp_records:', e);
+            }
+            records = [...defaultRecords];
+            saveRecordsToStorage();
+        }
+
+        function saveRecordsToStorage() {
+            try {
+                localStorage.setItem('bp_records', JSON.stringify(records));
+                updateSyncStatus('saved', '保存済み');
+            } catch (e) {
+                console.error('localStorage save error:', e);
+                updateSyncStatus('offline', '保存エラー');
+            }
+        }
+
+        function applyDateToInputs(dateObj) {
+            const dInput = document.getElementById('input-date');
+            const tInput = document.getElementById('input-time');
+            if (dInput) {
+                dInput.value = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
+            }
+            if (tInput) {
+                tInput.value = `${String(dateObj.getHours()).padStart(2, '0')}:${String(dateObj.getMinutes()).padStart(2, '0')}`;
+            }
+        }
+
+        function initApp() {
+            applyDateToInputs(new Date());
+            loadRecordsFromStorage();
+            renderList();
+            setupPhotoViewerGestures();
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initApp);
+        } else {
+            initApp();
+        }
+
+        // ==========================================
+        // 【機能1】写真プレビュー & ズーム / パン操作
+        // ==========================================
+        let currentPhotoZoom = 1.0;
+        let photoPanX = 0;
+        let photoPanY = 0;
+        let isPanning = false;
+        let panStartX = 0;
+        let panStartY = 0;
+        let initialPinchDist = 0;
+        let initialPinchZoom = 1.0;
+
+        function updatePhotoTransform(smooth = false) {
+            const img = document.getElementById('photo-ref-img');
+            const zoomText = document.getElementById('photo-zoom-level');
+            if (!img) return;
+
+            if (smooth) {
+                img.style.transition = 'transform 0.2s cubic-bezier(0.2, 0, 0, 1)';
+            } else {
+                img.style.transition = 'none';
+            }
+
+            img.style.transform = `translate(${photoPanX}px, ${photoPanY}px) scale(${currentPhotoZoom})`;
+            if (zoomText) {
+                zoomText.textContent = `${currentPhotoZoom.toFixed(1)}x`;
+            }
+
+            // プリセットボタンのスタイル更新
+            document.querySelectorAll('.zoom-preset-btn').forEach(btn => {
+                const targetZoom = parseFloat(btn.dataset.zoom);
+                if (Math.abs(targetZoom - currentPhotoZoom) < 0.08) {
+                    btn.classList.add('bg-sky-600', 'text-white');
+                    btn.classList.remove('bg-slate-700', 'text-slate-200');
+                } else {
+                    btn.classList.remove('bg-sky-600', 'text-white');
+                    btn.classList.add('bg-slate-700', 'text-slate-200');
+                }
+            });
+        }
+
+        function setPhotoZoom(zoom) {
+            currentPhotoZoom = Math.min(Math.max(zoom, 1.0), 3.5);
+            if (currentPhotoZoom <= 1.0) {
+                photoPanX = 0;
+                photoPanY = 0;
+            }
+            updatePhotoTransform(true);
+        }
+
+        function resetPhotoZoom() {
+            setPhotoZoom(1.0);
+        }
+
+        function setupPhotoViewerGestures() {
+            const viewport = document.getElementById('photo-viewport');
+            if (!viewport) return;
+
+            // タッチジェスチャー（ピンチズーム & パン）
+            viewport.addEventListener('touchstart', (e) => {
+                if (e.touches.length === 1) {
+                    isPanning = true;
+                    panStartX = e.touches[0].clientX - photoPanX;
+                    panStartY = e.touches[0].clientY - photoPanY;
+                } else if (e.touches.length === 2) {
+                    isPanning = false;
+                    initialPinchDist = Math.hypot(
+                        e.touches[0].clientX - e.touches[1].clientX,
+                        e.touches[0].clientY - e.touches[1].clientY
+                    );
+                    initialPinchZoom = currentPhotoZoom;
+                }
+            }, { passive: false });
+
+            viewport.addEventListener('touchmove', (e) => {
+                e.preventDefault(); // 画面全体のスクロールを抑止
+                if (e.touches.length === 1 && isPanning) {
+                    if (currentPhotoZoom > 1.0) {
+                        photoPanX = e.touches[0].clientX - panStartX;
+                        photoPanY = e.touches[0].clientY - panStartY;
+                        updatePhotoTransform(false);
+                    }
+                } else if (e.touches.length === 2 && initialPinchDist > 0) {
+                    const currentDist = Math.hypot(
+                        e.touches[0].clientX - e.touches[1].clientX,
+                        e.touches[0].clientY - e.touches[1].clientY
+                    );
+                    const factor = currentDist / initialPinchDist;
+                    currentPhotoZoom = Math.min(Math.max(initialPinchZoom * factor, 1.0), 3.5);
+                    if (currentPhotoZoom <= 1.0) {
+                        photoPanX = 0;
+                        photoPanY = 0;
+                    }
+                    updatePhotoTransform(false);
+                }
+            }, { passive: false });
+
+            viewport.addEventListener('touchend', (e) => {
+                if (e.touches.length === 0) {
+                    isPanning = false;
+                    initialPinchDist = 0;
+                    updatePhotoTransform(true);
+                } else if (e.touches.length === 1) {
+                    isPanning = true;
+                    panStartX = e.touches[0].clientX - photoPanX;
+                    panStartY = e.touches[0].clientY - photoPanY;
+                    initialPinchDist = 0;
+                }
+            });
+
+            // マウスドラッグ対応（PCブラウザ等での操作用）
+            viewport.addEventListener('mousedown', (e) => {
+                if (currentPhotoZoom > 1.0) {
+                    isPanning = true;
+                    panStartX = e.clientX - photoPanX;
+                    panStartY = e.clientY - photoPanY;
+                    e.preventDefault();
+                }
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                if (isPanning && currentPhotoZoom > 1.0) {
+                    photoPanX = e.clientX - panStartX;
+                    photoPanY = e.clientY - panStartY;
+                    updatePhotoTransform(false);
+                }
+            });
+
+            window.addEventListener('mouseup', () => {
+                if (isPanning) {
+                    isPanning = false;
+                    updatePhotoTransform(true);
+                }
+            });
+        }
+
+        // ==========================================
+        // 【機能2】数値入力欄のワンタップ調整機能 (-1 / +1)
+        // ==========================================
+        function adjustValue(inputId, delta) {
+            const input = document.getElementById(inputId);
+            if (!input) return;
+
+            let val = parseInt(input.value, 10);
+            if (isNaN(val)) {
+                // 空の場合の標準初期値
+                if (inputId === 'input-sys') val = 120;
+                else if (inputId === 'input-dia') val = 80;
+                else if (inputId === 'input-pulse') val = 70;
+                else val = 0;
+            } else {
+                val += delta;
+            }
+
+            // 負の値にならないようクリップ
+            if (val < 0) val = 0;
+            input.value = val;
+            
+            // 入力イベント発火
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+
+        // ==========================================
+        // EXIF日時の自動抽出 (維持項目)
+        // ==========================================
+        function readExifDateFull(file) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = function (e) {
+                    try {
+                        const view = new DataView(e.target.result);
+                        const length = view.byteLength;
+                        if (length >= 4 && view.getUint16(0, false) === 0xFFD8) {
+                            let offset = 2;
+                            while (offset + 4 < length) {
+                                const marker = view.getUint16(offset, false);
+                                offset += 2;
+                                if (marker === 0xFFE1) {
+                                    const segLen = view.getUint16(offset, false);
+                                    if (offset + 8 < length && view.getUint32(offset + 2, false) === 0x45786966) {
+                                        const parsed = parseTiffHeader(view, offset + 8, length);
+                                        if (parsed) return resolve(parsed);
+                                    }
+                                    offset += segLen;
+                                } else if (marker === 0xFFDA || marker === 0xFFD9) break;
+                                else if ((marker & 0xFF00) === 0xFF00) {
+                                    if (marker >= 0xFFD0 && marker <= 0xFFD8) continue;
+                                    offset += view.getUint16(offset, false);
+                                } else break;
+                            }
+                        }
+                        resolve(null);
+                    } catch (err) { resolve(null); }
+                };
+                reader.onerror = () => resolve(null);
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        function parseTiffHeader(view, tiffOffset, maxLength) {
+            const endian = view.getUint16(tiffOffset, false);
+            if (endian !== 0x4949 && endian !== 0x4D4D) return null;
+            const little = endian === 0x4949;
+            const ifdStart = tiffOffset + view.getUint32(tiffOffset + 4, little);
+            let exifIfdPointer = null, dateTimeStr = null;
+
+            for (let i = 0, entries = view.getUint16(ifdStart, little); i < entries; i++) {
+                const tag = view.getUint16(ifdStart + 2 + i * 12, little);
+                if (tag === 0x8769) exifIfdPointer = view.getUint32(ifdStart + 2 + i * 12 + 8, little);
+                if (tag === 0x0132 && !dateTimeStr) { // DateTimeタグ
+                    const valOffset = view.getUint32(ifdStart + 2 + i * 12 + 8, little);
+                    dateTimeStr = readAscii(view, tiffOffset + valOffset, 19);
+                }
+            }
+
+            if (exifIfdPointer) {
+                const exifStart = tiffOffset + exifIfdPointer;
+                for (let i = 0, entries = view.getUint16(exifStart, little); i < entries; i++) {
+                    const entryOffset = exifStart + 2 + i * 12;
+                    const tag = view.getUint16(entryOffset, little);
+                    if (tag === 0x9003 || tag === 0x9004) {
+                        const valOffset = view.getUint32(entryOffset + 8, little);
+                        dateTimeStr = readAscii(view, tiffOffset + valOffset, 19);
+                        if (dateTimeStr) break;
+                    }
+                }
+            }
+            if (dateTimeStr) {
+                const parts = dateTimeStr.trim().split(/[:\s\-]/);
+                if (parts.length >= 5) return new Date(parts[0], parts[1]-1, parts[2], parts[3], parts[4], parts[5]||0);
+            }
+            return null;
+        }
+
+        function readAscii(view, offset, maxLen) {
+            let str = '';
+            for (let i = 0; i < maxLen; i++) {
+                const code = view.getUint8(offset + i);
+                if (code === 0) break;
+                str += String.fromCharCode(code);
+            }
+            return str;
+        }
+
+        function resizeImageToBase64(file, maxSize) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        let w = img.width, h = img.height;
+                        if (w > maxSize || h > maxSize) {
+                            if (w > h) { h = Math.round(h * maxSize / w); w = maxSize; } 
+                            else { w = Math.round(w * maxSize / h); h = maxSize; }
+                        }
+                        const canvas = document.createElement('canvas');
+                        canvas.width = w; canvas.height = h;
+                        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                        resolve(canvas.toDataURL('image/jpeg', 0.85).split(',')[1]);
+                    };
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        // ==========================================
+        // 【オムロン血圧計専用 精密OCRパイプライン】
+        // 1. LCD画面自動検出・矩形切り出し（低彩度・明度差・エッジエネルギー解析）
+        // 2. トップハット/ブラックハット変換 ＋ 局所適応二値化 ＋ 方向性モルフォロジー ＋ 日本語/OKマーク事前マスク
+        // 3. 画面レイアウト固定ROI分割 ＋ 7セグメント専用構造解析（最上段日時・上段SYS・中段DIA・下段PULSE）
+        // 4. Tesseract.js (複数PSM) とのハイブリッド相互投票 & 生理学的トリプレット判定
+        // ==========================================
+
+        // 1. 液晶画面領域（LCDエリア）の自動検出・切り出し
+        function detectAndCropLcd(file) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const origW = img.width, origH = img.height;
+                        
+                        // 高速解析用サムネイル（最大360px）
+                        const maxThumb = 360;
+                        let thumbW = origW, thumbH = origH;
+                        if (thumbW > maxThumb || thumbH > maxThumb) {
+                            if (thumbW > thumbH) { thumbH = Math.round(thumbH * maxThumb / thumbW); thumbW = maxThumb; }
+                            else { thumbW = Math.round(thumbW * maxThumb / thumbH); thumbH = maxThumb; }
+                        }
+
+                        const thumbCanvas = document.createElement('canvas');
+                        thumbCanvas.width = thumbW;
+                        thumbCanvas.height = thumbH;
+                        const tctx = thumbCanvas.getContext('2d');
+                        tctx.drawImage(img, 0, 0, thumbW, thumbH);
+                        const tdata = tctx.getImageData(0, 0, thumbW, thumbH).data;
+
+                        const scores = new Float32Array(thumbW * thumbH);
+                        const gray = new Uint8Array(thumbW * thumbH);
+
+                        for (let i = 0; i < thumbW * thumbH; i++) {
+                            const r = tdata[i * 4];
+                            const g = tdata[i * 4 + 1];
+                            const b = tdata[i * 4 + 2];
+                            const y = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+                            gray[i] = y;
+
+                            const maxC = Math.max(r, g, b);
+                            const minC = Math.min(r, g, b);
+                            const sat = maxC > 0 ? (maxC - minC) / maxC : 0;
+
+                            // 液晶画面の特性: 彩度が低く（グレー・緑がかったグレー）、適度な明度を持つ
+                            let score = 0;
+                            if (sat < 0.22 && y >= 35 && y <= 225) {
+                                score = 1.0;
+                            } else if (sat < 0.35 && y >= 30 && y <= 235) {
+                                score = 0.5;
+                            }
+                            scores[i] = score;
+                        }
+
+                        // エッジ勾配エネルギーを加算（文字や液晶枠線があるエリアはコントラストが高い）
+                        for (let y = 1; y < thumbH - 1; y++) {
+                            for (let x = 1; x < thumbW - 1; x++) {
+                                const idx = y * thumbW + x;
+                                const edge = Math.abs(gray[idx + 1] - gray[idx - 1]) + Math.abs(gray[idx + thumbW] - gray[idx - thumbW]);
+                                if (edge > 25 && scores[idx] > 0) {
+                                    scores[idx] += 0.8;
+                                }
+                            }
+                        }
+
+                        // 水平・垂直方向のプロファイル投影
+                        const projX = new Float32Array(thumbW);
+                        const projY = new Float32Array(thumbH);
+                        for (let y = 0; y < thumbH; y++) {
+                            for (let x = 0; x < thumbW; x++) {
+                                const val = scores[y * thumbW + x];
+                                projX[x] += val;
+                                projY[y] += val;
+                            }
+                        }
+
+                        function findRange(proj, len, threshRatio = 0.28) {
+                            let maxV = 0;
+                            for (let i = 0; i < len; i++) if (proj[i] > maxV) maxV = proj[i];
+                            if (maxV === 0) return [0, len - 1];
+                            const t = maxV * threshRatio;
+                            let s = 0, end = len - 1;
+                            while (s < len && proj[s] < t) s++;
+                            while (end >= 0 && proj[end] < t) end--;
+                            if (s >= end) return [0, len - 1];
+                            return [s, end];
+                        }
+
+                        const [sx, ex] = findRange(projX, thumbW, 0.28);
+                        const [sy, ey] = findRange(projY, thumbH, 0.28);
+
+                        const bwThumb = ex - sx + 1;
+                        const bhThumb = ey - sy + 1;
+                        const areaRatio = (bwThumb * bhThumb) / (thumbW * thumbH);
+                        const aspect = bwThumb / bhThumb;
+
+                        let cropX, cropY, cropW, cropH, isDetected = false;
+
+                        // LCD画面領域のサイズとアスペクト比の検証
+                        if (areaRatio >= 0.12 && areaRatio <= 0.92 && aspect >= 0.50 && aspect <= 2.2) {
+                            const scaleX = origW / thumbW;
+                            const scaleY = origH / thumbH;
+                            const rawX = Math.round(sx * scaleX);
+                            const rawY = Math.round(sy * scaleY);
+                            const rawW = Math.round(bwThumb * scaleX);
+                            const rawH = Math.round(bhThumb * scaleY);
+
+                            // 周囲5%のマージン（数字の端欠け防止）
+                            const padX = Math.round(rawW * 0.05);
+                            const padY = Math.round(rawH * 0.05);
+                            cropX = Math.max(0, rawX - padX);
+                            cropY = Math.max(0, rawY - padY);
+                            cropW = Math.min(origW - cropX, rawW + padX * 2);
+                            cropH = Math.min(origH - cropY, rawH + padY * 2);
+                            isDetected = true;
+                        } else {
+                            // フォールバック: 中央75%のエリア
+                            cropW = Math.round(origW * 0.75);
+                            cropH = Math.round(origH * 0.75);
+                            cropX = Math.round((origW - cropW) / 2);
+                            cropY = Math.round((origH - cropH) / 2);
+                        }
+
+                        // クロップ画像の作成（解像度を幅800pxに標準化）
+                        const targetW = 800;
+                        const targetH = Math.round(cropH * (targetW / cropW));
+                        const canvas = document.createElement('canvas');
+                        canvas.width = targetW;
+                        canvas.height = targetH;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, targetW, targetH);
+
+                        resolve({
+                            canvas,
+                            detected: isDetected,
+                            targetW,
+                            targetH
+                        });
+                    };
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        // 高速 1D 分離型最大値・最小値フィルター（モルフォロジー演算用 O(1) スライディングウィンドウ）
+        function maxFilter1D(src, dst, length, stride, count, r, isRow) {
+            const deque = new Int32Array(length);
+            for (let c = 0; c < count; c++) {
+                let head = 0, tail = 0;
+                for (let i = 0; i < length + r; i++) {
+                    if (i < length) {
+                        const idx = isRow ? (c * stride + i) : (i * stride + c);
+                        const val = src[idx];
+                        while (tail > head) {
+                            const lastIdx = isRow ? (c * stride + deque[tail - 1]) : (deque[tail - 1] * stride + c);
+                            if (src[lastIdx] <= val) tail--; else break;
+                        }
+                        deque[tail++] = i;
+                    }
+                    if (i >= r) {
+                        while (head < tail && deque[head] < i - 2 * r) head++;
+                        const outIdx = isRow ? (c * stride + (i - r)) : ((i - r) * stride + c);
+                        const bestIdx = isRow ? (c * stride + deque[head]) : (deque[head] * stride + c);
+                        dst[outIdx] = src[bestIdx];
+                    }
+                }
+            }
+        }
+
+        function minFilter1D(src, dst, length, stride, count, r, isRow) {
+            const deque = new Int32Array(length);
+            for (let c = 0; c < count; c++) {
+                let head = 0, tail = 0;
+                for (let i = 0; i < length + r; i++) {
+                    if (i < length) {
+                        const idx = isRow ? (c * stride + i) : (i * stride + c);
+                        const val = src[idx];
+                        while (tail > head) {
+                            const lastIdx = isRow ? (c * stride + deque[tail - 1]) : (deque[tail - 1] * stride + c);
+                            if (src[lastIdx] >= val) tail--; else break;
+                        }
+                        deque[tail++] = i;
+                    }
+                    if (i >= r) {
+                        while (head < tail && deque[head] < i - 2 * r) head++;
+                        const outIdx = isRow ? (c * stride + (i - r)) : ((i - r) * stride + c);
+                        const bestIdx = isRow ? (c * stride + deque[head]) : (deque[head] * stride + c);
+                        dst[outIdx] = src[bestIdx];
+                    }
+                }
+            }
+        }
+
+        // トップハット変換（白飛び・強反射抽出）およびブラックハット変換（暗い7セグストローク抽出・背景影フラット化）
+        function computeMorphologyTransforms(gray, w, h, r = 12) {
+            const tmp = new Uint8Array(w * h);
+            
+            // Dilation(gray) = max2D
+            const dilated = new Uint8Array(w * h);
+            maxFilter1D(gray, tmp, w, w, h, r, true);
+            maxFilter1D(tmp, dilated, h, w, w, r, false);
+
+            // Closing(gray) = min2D(Dilation(gray))
+            const closed = new Uint8Array(w * h);
+            minFilter1D(dilated, tmp, w, w, h, r, true);
+            minFilter1D(tmp, closed, h, w, w, r, false);
+
+            // Erosion(gray) = min2D
+            const eroded = new Uint8Array(w * h);
+            minFilter1D(gray, tmp, w, w, h, r, true);
+            minFilter1D(tmp, eroded, h, w, w, r, false);
+
+            // Opening(gray) = max2D(Erosion(gray))
+            const opened = new Uint8Array(w * h);
+            maxFilter1D(eroded, tmp, w, w, h, r, true);
+            maxFilter1D(tmp, opened, h, w, w, r, false);
+
+            const blackhat = new Uint8Array(w * h);
+            const tophat = new Uint8Array(w * h);
+            for (let i = 0; i < w * h; i++) {
+                blackhat[i] = Math.max(0, closed[i] - gray[i]);
+                tophat[i] = Math.max(0, gray[i] - opened[i]);
+            }
+            return { blackhat, tophat };
+        }
+
+        // 7セグメント液晶特有の隙間補正（縦横方向別モルフォロジー閉空間結合）
+        // 「114」の「4」の中央横棒と縦棒の途切れや、「67」の「7」の上横棒と縦棒の隙間を補完
+        function applyDirectionalClosing(binary, w, h, rx = 4, ry = 3) {
+            let cur = new Uint8Array(binary);
+            
+            // 1. 水平方向クロージング（横方向の膨張rx -> 収縮rx）
+            if (rx > 0) {
+                let dil = new Uint8Array(cur);
+                for (let y = 0; y < h; y++) {
+                    const row = y * w;
+                    for (let x = 0; x < w; x++) {
+                        if (cur[row + x] === 0) {
+                            const xmin = Math.max(0, x - rx);
+                            const xmax = Math.min(w - 1, x + rx);
+                            for (let nx = xmin; nx <= xmax; nx++) dil[row + nx] = 0;
+                        }
+                    }
+                }
+                let ero = new Uint8Array(dil);
+                for (let y = 0; y < h; y++) {
+                    const row = y * w;
+                    for (let x = 0; x < w; x++) {
+                        if (dil[row + x] === 0) {
+                            const xmin = Math.max(0, x - rx);
+                            const xmax = Math.min(w - 1, x + rx);
+                            for (let nx = xmin; nx <= xmax; nx++) {
+                                if (dil[row + nx] === 255) { ero[row + x] = 255; break; }
+                            }
+                        }
+                    }
+                }
+                cur = ero;
+            }
+
+            // 2. 垂直方向クロージング（縦方向の膨張ry -> 収縮ry）
+            if (ry > 0) {
+                let dil = new Uint8Array(cur);
+                for (let y = 0; y < h; y++) {
+                    for (let x = 0; x < w; x++) {
+                        if (cur[y * w + x] === 0) {
+                            const ymin = Math.max(0, y - ry);
+                            const ymax = Math.min(h - 1, y + ry);
+                            for (let ny = ymin; ny <= ymax; ny++) dil[ny * w + x] = 0;
+                        }
+                    }
+                }
+                let ero = new Uint8Array(dil);
+                for (let y = 0; y < h; y++) {
+                    for (let x = 0; x < w; x++) {
+                        if (dil[y * w + x] === 0) {
+                            const ymin = Math.max(0, y - ry);
+                            const ymax = Math.min(h - 1, y + ry);
+                            for (let ny = ymin; ny <= ymax; ny++) {
+                                if (dil[ny * w + x] === 255) { ero[y * w + x] = 255; break; }
+                            }
+                        }
+                    }
+                }
+                cur = ero;
+            }
+            return cur;
+        }
+
+        // 2. オムロン液晶専用前処理（トップ/ブラックハット照明補正 ＋ 局所適応二値化 ＋ ラベル・OKマーク事前マスク ＋ 方向性隙間結合）
+        function preprocessLcdCanvas(sourceCanvas, brightnessFactor = 0.84) {
+            const w = sourceCanvas.width;
+            const h = sourceCanvas.height;
+            const canvas = document.createElement('canvas');
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(sourceCanvas, 0, 0);
+
+            const imgData = ctx.getImageData(0, 0, w, h);
+            const data = imgData.data;
+            const totalPixels = w * h;
+
+            // グレースケール & コントラストストレッチ
+            const gray = new Uint8Array(totalPixels);
+            let minVal = 255, maxVal = 0;
+            for (let i = 0; i < totalPixels; i++) {
+                const idx = i * 4;
+                const g = Math.round(0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2]);
+                gray[i] = g;
+                if (g < minVal) minVal = g;
+                if (g > maxVal) maxVal = g;
+            }
+
+            const range = Math.max(1, maxVal - minVal);
+            for (let i = 0; i < totalPixels; i++) {
+                gray[i] = Math.round(((gray[i] - minVal) / range) * 255);
+            }
+
+            // 【照明反射・影の除去】ブラックハット変換 ＋ トップハット変換
+            // ブラックハット変換によって、画面右端などの円形白飛び（ハレーション）や斜めの影がフラット化され、
+            // 黒い7セグメントのストロークのみが高コントラストで抽出されます。
+            const { blackhat, tophat } = computeMorphologyTransforms(gray, w, h, 12);
+
+            // 背景フラット化補正画像（文字=暗い値、背景/照明反射/影=255）
+            const leveled = new Uint8Array(totalPixels);
+            for (let i = 0; i < totalPixels; i++) {
+                // 白飛び反射（ハレーション）領域の抑制
+                const isGlare = gray[i] >= 238 || (tophat[i] > 35 && gray[i] > 200);
+                if (isGlare) {
+                    leveled[i] = 255;
+                } else {
+                    const bh = blackhat[i];
+                    leveled[i] = Math.max(0, 255 - Math.min(255, Math.round(bh * 2.5)));
+                }
+            }
+
+            // 積分画像（Integral Image）の計算（局所適応二値化用）
+            const integral = new Float64Array((w + 1) * (h + 1));
+            for (let y = 0; y < h; y++) {
+                let rowSum = 0;
+                for (let x = 0; x < w; x++) {
+                    rowSum += leveled[y * w + x];
+                    integral[(y + 1) * (w + 1) + (x + 1)] = integral[y * (w + 1) + (x + 1)] + rowSum;
+                }
+            }
+
+            // 局所適応二値化（文字=0(黒), 背景=255(白)）
+            const r = Math.max(12, Math.round(Math.min(w, h) / 16));
+            let bin = new Uint8Array(totalPixels);
+            for (let y = 0; y < h; y++) {
+                const y1 = Math.max(0, y - r);
+                const y2 = Math.min(h - 1, y + r);
+                for (let x = 0; x < w; x++) {
+                    const x1 = Math.max(0, x - r);
+                    const x2 = Math.min(w - 1, x + r);
+                    const count = (x2 - x1 + 1) * (y2 - y1 + 1);
+                    const sum = integral[(y2 + 1) * (w + 1) + (x2 + 1)]
+                              - integral[y1 * (w + 1) + (x2 + 1)]
+                              - integral[(y2 + 1) * (w + 1) + x1]
+                              + integral[y1 * (w + 1) + x1];
+                    const localMean = sum / count;
+                    bin[y * w + x] = leveled[y * w + x] < localMean * brightnessFactor ? 0 : 255;
+                }
+            }
+
+            // 【機種特有のノイズ・誤認識の事前マスク除外（最重要）】
+            // 1. 液晶画面の左端約25%の領域（「最高血圧」「最低血圧」「脈拍」の日本語ラベル領域）
+            //    漢字の画数を「1」や「4」と誤認するのを防ぐため、あらかじめ完全に白(255)でマスク
+            const maskLeftX = Math.round(w * 0.25);
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < maskLeftX; x++) {
+                    bin[y * w + x] = 255;
+                }
+            }
+
+            // 2. 脈拍エリアの左隣にある「(OK)」アイコン（カフぴったり巻きマーク）の除外
+            //    丸囲みのOKマークを「0」や「8」などの数字と誤認しないよう、脈拍行(y >= h * 0.70)の
+            //    左側(x < w * 0.48)を白(255)でマスクし、右側の脈拍数値のみを残す
+            const pulseStartY = Math.round(h * 0.70);
+            const pulseMaskX = Math.round(w * 0.48);
+            for (let y = pulseStartY; y < h; y++) {
+                for (let x = 0; x < pulseMaskX; x++) {
+                    bin[y * w + x] = 255;
+                }
+            }
+
+            // 【7セグメント線の隙間補完】
+            // 縦横それぞれに適したモルフォロジー閉空間処理を行い、「114」の「4」や「67」の「7」の途切れを結合
+            bin = applyDirectionalClosing(bin, w, h, 4, 3);
+
+            // 連結成分ラベリング ＆ 画面の端に触れている外枠や影の自動除去
+            let current = new Uint8Array(bin);
+            const labels = new Int32Array(w * h).fill(0);
+            let currentLabel = 0;
+            const components = [];
+            const dx = [-1, 0, 1, -1, 1, -1, 0, 1];
+            const dy = [-1, -1, -1, 0, 0, 1, 1, 1];
+
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    const idx = y * w + x;
+                    if (current[idx] === 0 && labels[idx] === 0) {
+                        currentLabel++;
+                        let minX = x, maxX = x, minY = y, maxY = y;
+                        let count = 0;
+                        const queue = [idx];
+                        labels[idx] = currentLabel;
+                        let head = 0;
+                        while (head < queue.length) {
+                            const curr = queue[head++];
+                            const cx = curr % w;
+                            const cy = Math.floor(curr / w);
+                            count++;
+                            if (cx < minX) minX = cx;
+                            if (cx > maxX) maxX = cx;
+                            if (cy < minY) minY = cy;
+                            if (cy > maxY) maxY = cy;
+
+                            for (let d = 0; d < 8; d++) {
+                                const nx = cx + dx[d];
+                                const ny = cy + dy[d];
+                                if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
+                                    const nidx = ny * w + nx;
+                                    if (current[nidx] === 0 && labels[nidx] === 0) {
+                                        labels[nidx] = currentLabel;
+                                        queue.push(nidx);
+                                    }
+                                }
+                            }
+                        }
+
+                        const compW = maxX - minX + 1;
+                        const compH = maxY - minY + 1;
+                        const touchesBorder = (minX <= 2 || minY <= 2 || maxX >= w - 3 || maxY >= h - 3);
+                        // 外枠・ベゼル・巨大な影の判定
+                        const isBorder = (touchesBorder && (compW >= w * 0.35 || compH >= h * 0.35 || count > w * h * 0.03)) ||
+                                         (compW > w * 0.85 || compH > h * 0.85 || count > w * h * 0.22);
+
+                        if (isBorder) {
+                            // 枠線や影を除去（白255に置換）
+                            for (let i = 0; i < queue.length; i++) {
+                                current[queue[i]] = 255;
+                            }
+                        } else {
+                            components.push({ minX, maxX, minY, maxY, w: compW, h: compH, count });
+                        }
+                    }
+                }
+            }
+
+            // Canvasに反映（プレビューおよびTesseract入力用）
+            for (let i = 0; i < totalPixels; i++) {
+                const v = current[i];
+                data[i * 4] = v;
+                data[i * 4 + 1] = v;
+                data[i * 4 + 2] = v;
+                data[i * 4 + 3] = 255;
+            }
+            ctx.putImageData(imgData, 0, 0);
+
+            return {
+                canvas,
+                bin: current,
+                w,
+                h,
+                components,
+                dataUrl: canvas.toDataURL('image/png')
+            };
+        }
+
+        // 3. 対象血圧計の画面レイアウト固定ルールに基づくROI分割 ＆ 7セグメント専用構造解析
+        function analyze7SegmentStructure(preprocessed) {
+            const { bin, w, h, components } = preprocessed;
+
+            // 7セグメント数字候補コンポーネントの基本フィルタリング
+            const digitComps = components.filter(c => {
+                const aspect = c.h / c.w;
+                return c.h >= Math.max(14, h * 0.04) && c.w >= 5 && 
+                       c.h <= h * 0.70 && c.w <= w * 0.55 &&
+                       c.count >= 20;
+            });
+
+            if (digitComps.length === 0) return null;
+
+            // 7セグメント文字分類器
+            function classifyComponent(comp) {
+                const { minX, minY, w: bw, h: bh } = comp;
+                const aspect = bh / bw;
+
+                // 縦横比が非常に細い場合は数字の「1」と判定
+                if (aspect >= 2.05) {
+                    return { digit: 1, confidence: 0.95 };
+                }
+
+                // 横長の極小パーツ（ハイフン/ダッシュ「-」: 時計未設定「--:--」の構成要素）
+                if (aspect < 0.42 && bh <= h * 0.08) {
+                    return { digit: -2, isHyphen: true, confidence: 0.9 };
+                }
+
+                // 7領域のサンプリング矩形定義（a:上, b:右上, c:右下, d:下, e:左下, f:左上, g:中央）
+                const segRegions = {
+                    a: { x: [0.22, 0.78], y: [0.03, 0.18] },
+                    b: { x: [0.70, 0.98], y: [0.15, 0.45] },
+                    c: { x: [0.70, 0.98], y: [0.55, 0.85] },
+                    d: { x: [0.22, 0.78], y: [0.82, 0.97] },
+                    e: { x: [0.02, 0.30], y: [0.55, 0.85] },
+                    f: { x: [0.02, 0.30], y: [0.15, 0.45] },
+                    g: { x: [0.22, 0.78], y: [0.42, 0.58] }
+                };
+
+                const densities = {};
+                for (const [seg, reg] of Object.entries(segRegions)) {
+                    const x1 = Math.floor(minX + reg.x[0] * bw);
+                    const x2 = Math.ceil(minX + reg.x[1] * bw);
+                    const y1 = Math.floor(minY + reg.y[0] * bh);
+                    const y2 = Math.ceil(minY + reg.y[1] * bh);
+                    let black = 0, total = 0;
+                    for (let cy = y1; cy <= y2; cy++) {
+                        for (let cx = x1; cx <= x2; cx++) {
+                            if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
+                                if (bin[cy * w + cx] === 0) black++;
+                                total++;
+                            }
+                        }
+                    }
+                    densities[seg] = total > 0 ? (black / total) : 0;
+                }
+
+                // 各数字のセグメント点灯パターン
+                const patterns = {
+                    0: { on: ['a', 'b', 'c', 'd', 'e', 'f'], off: ['g'] },
+                    1: { on: ['b', 'c'], off: ['a', 'd', 'e', 'f', 'g'] },
+                    2: { on: ['a', 'b', 'd', 'e', 'g'], off: ['c', 'f'] },
+                    3: { on: ['a', 'b', 'c', 'd', 'g'], off: ['e', 'f'] },
+                    4: { on: ['b', 'c', 'f', 'g'], off: ['a', 'd', 'e'] },
+                    5: { on: ['a', 'c', 'd', 'f', 'g'], off: ['b', 'e'] },
+                    6: { on: ['a', 'c', 'd', 'e', 'f', 'g'], off: ['b'] },
+                    7: { on: ['a', 'b', 'c'], off: ['d', 'e', 'f', 'g'] },
+                    8: { on: ['a', 'b', 'c', 'd', 'e', 'f', 'g'], off: [] },
+                    9: { on: ['a', 'b', 'c', 'd', 'f', 'g'], off: ['e'] }
+                };
+
+                let bestDigit = -1;
+                let bestScore = -999;
+                for (let d = 0; d <= 9; d++) {
+                    const pat = patterns[d];
+                    let score = 0;
+                    for (const s of pat.on) {
+                        score += (densities[s] >= 0.20 ? 2.0 : -1.5) * (0.5 + densities[s]);
+                    }
+                    for (const s of pat.off) {
+                        score += (densities[s] < 0.22 ? 2.0 : -3.0) * (1.2 - densities[s]);
+                    }
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestDigit = d;
+                    }
+                }
+                return { digit: bestDigit, confidence: bestScore };
+            }
+
+            // 全コンポーネントの分類
+            const parsedComps = digitComps.map(c => {
+                const res = classifyComponent(c);
+                return {
+                    digit: res.digit,
+                    isHyphen: res.isHyphen || false,
+                    x: c.minX,
+                    y: c.minY,
+                    w: c.w,
+                    h: c.h,
+                    centerY: c.minY + c.h / 2,
+                    confidence: res.confidence
+                };
+            });
+
+            // ==========================================================
+            // 【固定レイアウトROIによる厳格な領域分割と割り当て】
+            // 1. 【最上段（中央・極小）】日時エリア: y < h * 0.18
+            // 2. 【上段（中央〜右寄り・特大）】最高血圧(SYS): h * 0.15 <= y < h * 0.48
+            // 3. 【中段（中央〜右寄り・特大）】最低血圧(DIA): h * 0.46 <= y < h * 0.72
+            // 4. 【下段（中央〜右寄り・中サイズ）】脈拍(PULSE): h * 0.70 <= y <= h * 0.98, x >= w * 0.46
+            // ==========================================================
+
+            // 最上段: 日時エリアの解析
+            let detectedDate = null;
+            let detectedTime = null;
+            const topComps = parsedComps.filter(c => c.centerY < h * 0.18);
+            const hyphensInTop = topComps.filter(c => c.isHyphen || c.digit === -2);
+            // 時計未設定で「--:--」やハイフンのみが表示されている場合は無理に数値化せず null（端末日時自動セット）
+            if (hyphensInTop.length >= 2 || topComps.length === 0) {
+                detectedDate = null;
+                detectedTime = null;
+            } else {
+                const topDigits = topComps.filter(c => c.digit >= 0).sort((a, b) => a.x - b.x);
+                if (topDigits.length === 4) {
+                    const str = topDigits.map(d => d.digit).join('');
+                    const n1 = parseInt(str.slice(0, 2), 10);
+                    const n2 = parseInt(str.slice(2, 4), 10);
+                    if (n1 >= 0 && n1 <= 23 && n2 >= 0 && n2 <= 59) {
+                        detectedTime = `${String(n1).padStart(2, '0')}:${String(n2).padStart(2, '0')}`;
+                    } else if (n1 >= 1 && n1 <= 12 && n2 >= 1 && n2 <= 31) {
+                        detectedDate = `${String(n1).padStart(2, '0')}/${String(n2).padStart(2, '0')}`;
+                    }
+                }
+            }
+
+            // 数字コンポーネント（0〜9）のみを抽出
+            const validDigits = parsedComps.filter(c => c.digit >= 0 && c.centerY >= h * 0.14);
+            if (validDigits.length < 2) return null;
+
+            // 各段（SYS, DIA, PULSE）へのROI分割割り当て
+            function assembleRoiNumber(comps) {
+                if (!comps || comps.length === 0) return null;
+                comps.sort((a, b) => a.x - b.x);
+                const str = comps.map(d => d.digit).join('');
+                const val = parseInt(str, 10);
+                return (!isNaN(val) && val >= 30 && val <= 260) ? val : null;
+            }
+
+            // 上段（SYS ROI）
+            const sysDigits = validDigits.filter(c => c.centerY >= h * 0.14 && c.centerY < h * 0.48);
+            // 中段（DIA ROI）
+            const diaDigits = validDigits.filter(c => c.centerY >= h * 0.46 && c.centerY < h * 0.72);
+            // 下段（PULSE ROI: 右側 x >= w * 0.46 のみ）
+            const pulseDigits = validDigits.filter(c => c.centerY >= h * 0.70 && c.centerY <= h * 0.98 && c.x >= w * 0.46);
+
+            const sysVal = assembleRoiNumber(sysDigits);
+            const diaVal = assembleRoiNumber(diaDigits);
+            const pulseVal = assembleRoiNumber(pulseDigits);
+
+            // ROI別でSYSとDIAが綺麗に取れ、SYS > DIA を満たす場合（最も理想的）
+            if (sysVal && diaVal && sysVal > diaVal && sysVal >= 75 && diaVal >= 40) {
+                return {
+                    numbers: [sysVal, diaVal, pulseVal].filter(Boolean),
+                    triplet: { sys: sysVal, dia: diaVal, pulse: pulseVal || null },
+                    date: detectedDate,
+                    time: detectedTime
+                };
+            }
+
+            // フォールバック: 水平クラスター行分析による相互補正
+            validDigits.sort((a, b) => a.centerY - b.centerY);
+            const rows = [];
+            for (const d of validDigits) {
+                let placed = false;
+                for (const row of rows) {
+                    const avgY = row.reduce((sum, item) => sum + item.centerY, 0) / row.length;
+                    const avgH = row.reduce((sum, item) => sum + item.h, 0) / row.length;
+                    if (Math.abs(d.centerY - avgY) < avgH * 0.45) {
+                        row.push(d);
+                        placed = true;
+                        break;
+                    }
+                }
+                if (!placed) rows.push([d]);
+            }
+
+            const detectedNumbers = [];
+            for (const row of rows) {
+                row.sort((a, b) => a.x - b.x);
+                const str = row.map(d => d.digit).join('');
+                const val = parseInt(str, 10);
+                if (!isNaN(val) && val >= 35 && val <= 260) {
+                    const avgY = row.reduce((sum, item) => sum + item.centerY, 0) / row.length;
+                    detectedNumbers.push({ value: val, y: avgY, str, count: row.length });
+                }
+            }
+
+            detectedNumbers.sort((a, b) => a.y - b.y);
+            const values = detectedNumbers.map(n => n.value);
+
+            return {
+                numbers: values,
+                triplet: resolveBpTriplet(values),
+                rows: detectedNumbers,
+                date: detectedDate,
+                time: detectedTime
+            };
+        }
+
+        // 抽出された数値から【最高血圧 > 最低血圧、および脈拍】を判定する洗練ロジック
+        function resolveBpTriplet(numbers) {
+            if (!numbers || numbers.length === 0) return null;
+            const valid = numbers.filter(n => n >= 35 && n <= 260);
+            if (valid.length < 2) return null;
+
+            // パターンA: 3つ検出された場合
+            if (valid.length === 3) {
+                const [n0, n1, n2] = valid;
+                if (n0 > n1 && n0 >= 75 && n1 >= 40 && n2 >= 40) {
+                    return { sys: n0, dia: n1, pulse: n2 };
+                }
+                if (n1 > n0 && n1 >= 75 && n0 >= 40 && n2 >= 40) {
+                    return { sys: n1, dia: n0, pulse: n2 };
+                }
+                const candidates = [
+                    { sys: n0, dia: n1, pulse: n2 },
+                    { sys: n0, dia: n2, pulse: n1 },
+                    { sys: n1, dia: n0, pulse: n2 },
+                    { sys: n1, dia: n2, pulse: n0 },
+                    { sys: n2, dia: n0, pulse: n1 },
+                    { sys: n2, dia: n1, pulse: n0 }
+                ].filter(c => c.sys > c.dia && c.sys >= 80 && c.dia >= 40 && c.dia <= 135 && c.pulse >= 40 && c.pulse <= 150);
+                
+                if (candidates.length > 0) {
+                    return candidates[0];
+                }
+            }
+
+            // パターンB: 4つ以上検出された場合（ノイズ除去）
+            if (valid.length > 3) {
+                for (let i = 0; i <= valid.length - 3; i++) {
+                    const s = valid[i], d = valid[i+1], p = valid[i+2];
+                    if (s > d && s >= 80 && s <= 230 && d >= 40 && d <= 130 && p >= 40 && p <= 140) {
+                        return { sys: s, dia: d, pulse: p };
+                    }
+                }
+                let best = null;
+                let bestScore = -999;
+                for (let i = 0; i < valid.length; i++) {
+                    for (let j = 0; j < valid.length; j++) {
+                        if (i === j) continue;
+                        for (let k = 0; k < valid.length; k++) {
+                            if (k === i || k === j) continue;
+                            const s = valid[i], d = valid[j], p = valid[k];
+                            if (s > d && s >= 80 && s <= 230 && d >= 40 && d <= 130 && p >= 40 && p <= 140) {
+                                let score = 100 - Math.abs(s - 125) - Math.abs(d - 80) - Math.abs(p - 70);
+                                score += (10 - i * 2 - j * 2 - k);
+                                if (score > bestScore) {
+                                    bestScore = score;
+                                    best = { sys: s, dia: d, pulse: p };
+                                }
+                            }
+                        }
+                    }
+                }
+                if (best) return best;
+            }
+
+            // パターンC: 2つのみ検出された場合（最高血圧・最低血圧）
+            if (valid.length === 2) {
+                const s = Math.max(valid[0], valid[1]);
+                const d = Math.min(valid[0], valid[1]);
+                if (s >= 75 && d >= 40) {
+                    return { sys: s, dia: d, pulse: null };
+                }
+            }
+
+            return null;
+        }
+
+        // 4. 無料ローカルOCR（専用7セグメント解析 + Tesseract.js）によるハイブリッド解析
+        async function analyzeWithFreeLocalOcr(file) {
+            let lastPreviewUrl = "";
+            let rawMatches = [];
+
+            try {
+                // ステップ1: 液晶画面領域（LCDエリア）の自動検出・切り出し
+                const lcdCrop = await detectAndCropLcd(file);
+
+                // ステップ2: 複数の適応二値化しきい値で並列実行
+                const thresholds = [0.84, 0.78, 0.90];
+                const preprocessedList = thresholds.map(factor => preprocessLcdCanvas(lcdCrop.canvas, factor));
+                lastPreviewUrl = preprocessedList[0].dataUrl;
+
+                // ステップ3: オムロン専用7セグメント構造解析を実行
+                let best7SegResult = null;
+                for (let i = 0; i < preprocessedList.length; i++) {
+                    const prep = preprocessedList[i];
+                    const segRes = analyze7SegmentStructure(prep);
+                    if (segRes && segRes.numbers.length > 0) {
+                        rawMatches = [...new Set([...rawMatches, ...segRes.numbers])];
+                        if (segRes.triplet) {
+                            if (segRes.triplet.pulse !== null) {
+                                best7SegResult = {
+                                    triplet: segRes.triplet,
+                                    date: segRes.date,
+                                    time: segRes.time,
+                                    factor: thresholds[i],
+                                    previewUrl: prep.dataUrl
+                                };
+                                break;
+                            } else if (!best7SegResult) {
+                                best7SegResult = {
+                                    triplet: segRes.triplet,
+                                    date: segRes.date,
+                                    time: segRes.time,
+                                    factor: thresholds[i],
+                                    previewUrl: prep.dataUrl
+                                };
+                            }
+                        }
+                    }
+                }
+
+                // ステップ4: Tesseract.js による補完解析（マスク済みの超明瞭画像）
+                let tesseractResult = null;
+                let tesseractDate = null;
+                let tesseractTime = null;
+                try {
+                    const worker = await Tesseract.createWorker('eng');
+                    await worker.setParameters({
+                        tessedit_char_whitelist: '0123456789/:- \n',
+                        tessedit_pageseg_mode: '6'
+                    });
+
+                    // 枠線除去・日本語マスク・OKマークマスク・隙間結合済みの最適二値化画像をTesseractに投入
+                    const targetCanvas = preprocessedList[0].dataUrl;
+                    const ret = await worker.recognize(targetCanvas);
+                    const text = ret.data.text || "";
+                    
+                    // 日時エリアの検出（時計未設定 --:-- の場合は日時なしとして扱う）
+                    if (!text.includes('--') && !text.includes('- -')) {
+                        const dateMatch = text.match(/\b(0?[1-9]|1[0-2])[\/\-](0?[1-9]|[12]\d|3[01])\b/);
+                        if (dateMatch) tesseractDate = `${dateMatch[1]}/${dateMatch[2]}`;
+                        const timeMatch = text.match(/\b([01]?\d|2[0-3])[:\s]([0-5]\d)\b/);
+                        if (timeMatch) tesseractTime = `${timeMatch[1]}:${timeMatch[2]}`;
+                    }
+
+                    const tMatches = (text.match(/\b\d{2,3}\b/g) || text.match(/\d{2,3}/g) || []).map(Number);
+                    rawMatches = [...new Set([...rawMatches, ...tMatches])];
+                    const tResolved = resolveBpTriplet(tMatches);
+
+                    if (tResolved && tResolved.pulse !== null) {
+                        tesseractResult = { triplet: tResolved, psm: 6, date: tesseractDate, time: tesseractTime };
+                    } else {
+                        // PSM 11 (Sparse text) でもリトライ
+                        await worker.setParameters({ tessedit_pageseg_mode: '11' });
+                        const ret11 = await worker.recognize(targetCanvas);
+                        const text11 = ret11.data.text || "";
+                        const m11 = (text11.match(/\b\d{2,3}\b/g) || text11.match(/\d{2,3}/g) || []).map(Number);
+                        rawMatches = [...new Set([...rawMatches, ...m11])];
+                        const r11 = resolveBpTriplet(m11);
+                        if (r11) {
+                            tesseractResult = { triplet: r11, psm: 11, date: tesseractDate, time: tesseractTime };
+                        }
+                    }
+                    await worker.terminate();
+                } catch (tErr) {
+                    console.warn("Tesseract worker error:", tErr);
+                }
+
+                // ステップ5: ハイブリッド相互投票 & 最終判定
+                const finalDate = best7SegResult?.date || tesseractDate || null;
+                const finalTime = best7SegResult?.time || tesseractTime || null;
+
+                // A. 7セグ構造解析とTesseractが両方とも検出できた場合
+                if (best7SegResult && tesseractResult) {
+                    const s = best7SegResult.triplet;
+                    const t = tesseractResult.triplet;
+                    const isFullMatch = (s.sys === t.sys && s.dia === t.dia && s.pulse === t.pulse);
+                    const isBpMatch = (s.sys === t.sys && s.dia === t.dia);
+
+                    if (isFullMatch) {
+                        return {
+                            data: { ...s, date: finalDate, time: finalTime },
+                            method: `ハイブリッド相互投票（オムロン7セグ解析+Tesseract完全一致）`,
+                            previewUrl: best7SegResult.previewUrl
+                        };
+                    }
+                    if (isBpMatch) {
+                        const pulse = s.pulse || t.pulse;
+                        return {
+                            data: { sys: s.sys, dia: s.dia, pulse, date: finalDate, time: finalTime },
+                            method: `ハイブリッド相互投票（最高・最低一致）`,
+                            previewUrl: best7SegResult.previewUrl
+                        };
+                    }
+                    const best = (s.pulse !== null) ? s : (t.pulse !== null ? t : s);
+                    return {
+                        data: { ...best, date: finalDate, time: finalTime },
+                        method: `オムロン専用7セグ精密構造解析`,
+                        previewUrl: best7SegResult.previewUrl
+                    };
+                }
+
+                // B. 7セグ構造解析のみ成功した場合
+                if (best7SegResult) {
+                    const hasAll = best7SegResult.triplet.pulse !== null;
+                    return {
+                        data: { ...best7SegResult.triplet, date: finalDate, time: finalTime },
+                        method: `オムロン専用7セグ精密構造解析（${hasAll ? '全項目検出' : '一部項目'}）`,
+                        previewUrl: best7SegResult.previewUrl
+                    };
+                }
+
+                // C. Tesseractのみ成功した場合
+                if (tesseractResult) {
+                    return {
+                        data: { ...tesseractResult.triplet, date: finalDate, time: finalTime },
+                        method: `Tesseract.js OCR（PSM ${tesseractResult.psm}）`,
+                        previewUrl: lastPreviewUrl
+                    };
+                }
+
+                // D. 検出失敗時
+                return {
+                    error: `数値を判定できませんでした（検出候補: ${rawMatches.join(', ') || 'なし'}）\n上の元写真プレビューを見ながら、直接入力・調整してください。`,
+                    previewUrl: lastPreviewUrl
+                };
+            } catch (e) {
+                return { error: `無料OCRエラー: ${e.message}`, previewUrl: lastPreviewUrl };
+            }
+        }
+
+        // 画像解析オーケストレーター（Gemini API設定時はGemini、未設定時は無料ローカルOCR）
+        async function analyzeBloodPressureImage(file) {
+            const apiKey = localStorage.getItem('gemini_api_key') || ""; 
+            if (apiKey) {
+                try {
+                    const base64ImageData = await resizeImageToBase64(file, 1024);
+                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+                    
+                    const prompt = `オムロン（OMRON）上腕式血圧計の液晶画面から、最高血圧・最低血圧・脈拍・日時を高精度に読み取り、指定のJSON形式のみで出力してください。
+
+【対象血圧計の画面レイアウト固定仕様】
+上から下へ以下の固定構造になっています:
+1. 【最上段（中央・極小）】日時エリア: 「月/日（例: 11/14）」または「時:分（例: 19:23）」が表示されます。時計未設定で「--:--」やハイフンのみが表示されている場合は、無理に数値化せず null にしてください。
+2. 【上段（中央〜右寄り・特大7セグ）】最高血圧 (sys): 左端に「最高血圧 mmHg」の日本語ラベルがあります。
+3. 【中段（中央〜右寄り・特大7セグ）】最低血圧 (dia): 左端に「最低血圧 mmHg」の日本語ラベルがあります。
+4. 【下段（中央〜右寄り・中サイズ7セグ）】脈拍 (pulse): 左端に「脈拍 拍/分」ラベルがあり、数字のすぐ左隣に丸囲みの「OK」アイコン（カフぴったり巻きマーク）が表示されます。
+
+【ノイズ・誤認識の除外ルール（厳守）】
+- 液晶画面の左端約25%にある日本語ラベル（「最高血圧」「最低血圧」「脈拍」「mmHg」「拍/分」など）は数字ではないので完全に無視してください。
+- 脈拍の左隣にある丸囲み「(OK)」アイコンは「0」や「8」などの数字と誤認せず無視し、脈拍エリアの右側の数値のみを抽出してください。
+- 画面右端などに発生する照明の映り込み（白い円形の反射・ハレーション）や背景の影はノイズとして無視してください。
+- 左端の日本語ラベルや(OK)アイコン、右側の照明反射は無視し、中央の7セグメント数字3段（上から最高血圧、最低血圧、脈拍）と、最上部の日時（--:--ならnull）だけを厳密なJSONで出力すること。
+
+出力フォーマット（JSONのみ）:
+{"sys": 114, "dia": 80, "pulse": 67, "date": "11/14", "time": "19:23"}
+※日時エリアが未設定（--:-- やハイフン）の場合は "date": null, "time": null としてください。日付のみ表示ならtimeはnull、時刻のみ表示ならdateはnullとしてください。`;
+
+                    const payload = {
+                        contents: [{ role: "user", parts: [
+                            { text: prompt },
+                            { inlineData: { mimeType: "image/jpeg", data: base64ImageData } }
+                        ]}],
+                        generationConfig: {
+                            responseMimeType: "application/json",
+                            responseSchema: {
+                                type: "OBJECT",
+                                properties: {
+                                    sys: { type: "INTEGER", description: "最高血圧 (SYS)" },
+                                    dia: { type: "INTEGER", description: "最低血圧 (DIA)" },
+                                    pulse: { type: "INTEGER", description: "脈拍 (PULSE)" },
+                                    date: { type: "STRING", nullable: true, description: "最上部の日時エリアの月/日（例: 11/14）。未設定(--:--)ならnull" },
+                                    time: { type: "STRING", nullable: true, description: "最上部の日時エリアの時:分（例: 19:23）。未設定(--:--)ならnull" }
+                                },
+                                required: ["sys", "dia", "pulse"]
+                            }
+                        }
+                    };
+                    const res = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await res.json();
+                    if (res.ok) {
+                        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+                        if (text) {
+                            const parsed = JSON.parse(text);
+                            // 未設定ハイフンのサニタイズ
+                            let lcdDate = parsed.date || null;
+                            let lcdTime = parsed.time || null;
+                            if (typeof lcdDate === 'string' && (lcdDate.includes('--') || lcdDate.includes('- -') || !/\d/.test(lcdDate))) lcdDate = null;
+                            if (typeof lcdTime === 'string' && (lcdTime.includes('--') || lcdTime.includes('- -') || !/\d/.test(lcdTime))) lcdTime = null;
+
+                            return {
+                                data: {
+                                    sys: parsed.sys,
+                                    dia: parsed.dia,
+                                    pulse: parsed.pulse,
+                                    date: lcdDate,
+                                    time: lcdTime
+                                },
+                                method: "Gemini AI"
+                            };
+                        }
+                    }
+                } catch (e) {
+                    console.warn("Gemini API error, falling back to free local OCR:", e);
+                }
+            }
+            // 無料ローカルOCRを実行
+            return await analyzeWithFreeLocalOcr(file);
+        }
+
+        function setAiStatus(type, title, detail, previewUrl = "") {
+            const box = document.getElementById('ai-status-box');
+            const titleEl = document.getElementById('ai-status-title');
+            const detailEl = document.getElementById('ai-status-detail');
+            const previewWrap = document.getElementById('debug-preview-wrap');
+            const previewImg = document.getElementById('debug-preview-img');
+
+            box.classList.remove('hidden', 'bg-emerald-50', 'border-emerald-200', 'text-emerald-900', 'bg-amber-50', 'border-amber-200', 'text-amber-900', 'bg-rose-50', 'border-rose-200', 'text-rose-900');
+            
+            if (type === 'success') {
+                box.classList.add('bg-emerald-50', 'border-emerald-200', 'text-emerald-900');
+            } else if (type === 'error') {
+                box.classList.add('bg-rose-50', 'border-rose-200', 'text-rose-900');
+            } else {
+                box.classList.add('bg-amber-50', 'border-amber-200', 'text-amber-900');
+            }
+            titleEl.textContent = title;
+            detailEl.textContent = detail;
+
+            if (previewUrl) {
+                previewImg.src = previewUrl;
+                previewWrap.classList.remove('hidden');
+            } else {
+                previewWrap.classList.add('hidden');
+            }
+        }
+
+        // 写真処理エントリーポイント
+        async function processPhoto(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const btnText = document.getElementById('photo-btn-text');
+            const originalText = btnText.textContent;
+            btnText.textContent = '画像を読み取り中...';
+            document.getElementById('ai-status-box').classList.add('hidden');
+            
+            // 【機能1】元写真をプレビューコンテナにロード＆ズームを1xにリセット
+            const photoContainer = document.getElementById('photo-ref-container');
+            const photoImg = document.getElementById('photo-ref-img');
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                photoImg.src = e.target.result;
+                photoContainer.classList.remove('hidden');
+                resetPhotoZoom();
+            };
+            reader.readAsDataURL(file);
+
+            try {
+                let dateInfo = "";
+                // EXIF撮影日時またはファイル日時の初期フォールバック取得
+                const exifDate = await readExifDateFull(file);
+                let fallbackDate = new Date();
+                if (exifDate && !isNaN(exifDate)) {
+                    fallbackDate = exifDate;
+                    dateInfo = `撮影日時(EXIF): ${fallbackDate.getFullYear()}-${String(fallbackDate.getMonth()+1).padStart(2,'0')}-${String(fallbackDate.getDate()).padStart(2,'0')} ${String(fallbackDate.getHours()).padStart(2,'0')}:${String(fallbackDate.getMinutes()).padStart(2,'0')}`;
+                } else if (file.lastModified) {
+                    fallbackDate = new Date(file.lastModified);
+                    dateInfo = `ファイル日時: ${fallbackDate.getFullYear()}-${String(fallbackDate.getMonth()+1).padStart(2,'0')}-${String(fallbackDate.getDate()).padStart(2,'0')} ${String(fallbackDate.getHours()).padStart(2,'0')}:${String(fallbackDate.getMinutes()).padStart(2,'0')}`;
+                } else {
+                    dateInfo = `端末現在日時: ${fallbackDate.getFullYear()}-${String(fallbackDate.getMonth()+1).padStart(2,'0')}-${String(fallbackDate.getDate()).padStart(2,'0')} ${String(fallbackDate.getHours()).padStart(2,'0')}:${String(fallbackDate.getMinutes()).padStart(2,'0')}`;
+                }
+
+                // 初期日時を端末/ファイル日時としてセット
+                applyDateToInputs(fallbackDate);
+
+                btnText.textContent = '7セグ数値を解析中...';
+                const result = await analyzeBloodPressureImage(file);
+
+                if (result.data && (result.data.sys || result.data.dia || result.data.pulse)) {
+                    if (result.data.sys) document.getElementById('input-sys').value = result.data.sys;
+                    if (result.data.dia) document.getElementById('input-dia').value = result.data.dia;
+                    if (result.data.pulse) document.getElementById('input-pulse').value = result.data.pulse;
+
+                    // 画面表示日時の反映（--:--やnullでなければ上書き、未設定なら端末日時自動セットを維持）
+                    let screenDateApplied = false;
+                    const rDate = result.data.date;
+                    const rTime = result.data.time;
+
+                    const isValidDate = rDate && typeof rDate === 'string' && !rDate.includes('--') && !rDate.includes('- -') && /\d/.test(rDate);
+                    const isValidTime = rTime && typeof rTime === 'string' && !rTime.includes('--') && !rTime.includes('- -') && /\d/.test(rTime);
+
+                    if (isValidDate) {
+                        const m = rDate.match(/(\d{1,2})[\/\-](\d{1,2})/);
+                        if (m) {
+                            const year = fallbackDate.getFullYear();
+                            const month = m[1].padStart(2, '0');
+                            const day = m[2].padStart(2, '0');
+                            document.getElementById('input-date').value = `${year}-${month}-${day}`;
+                            screenDateApplied = true;
+                        }
+                    }
+                    if (isValidTime) {
+                        const tm = rTime.match(/(\d{1,2})[:\s](\d{1,2})/);
+                        if (tm) {
+                            const hh = tm[1].padStart(2, '0');
+                            const mm = tm[2].padStart(2, '0');
+                            document.getElementById('input-time').value = `${hh}:${mm}`;
+                            screenDateApplied = true;
+                        }
+                    }
+
+                    if (screenDateApplied) {
+                        dateInfo = `画面表示日時を反映: ${document.getElementById('input-date').value} ${document.getElementById('input-time').value}`;
+                    } else {
+                        dateInfo = `日時: 端末日時を自動セット（血圧計側は未設定「--:--」）\n[${document.getElementById('input-date').value} ${document.getElementById('input-time').value}]`;
+                    }
+
+                    const hasAll = result.data.sys && result.data.dia && result.data.pulse;
+                    setAiStatus(
+                        hasAll ? 'success' : 'warning',
+                        hasAll ? `読み取り成功！（${result.method}）` : `一部数値を読み取りました（${result.method}）`,
+                        `${dateInfo}\n最高血圧(SYS): ${result.data.sys || '未検出'} mmHg / 最低血圧(DIA): ${result.data.dia || '未検出'} mmHg / 脈拍(PULSE): ${result.data.pulse || '未検出'} 拍/分\n※誤読がある場合は下の「-1」「+1」ボタンですぐに修正できます。`,
+                        result.previewUrl
+                    );
+                    showToast(hasAll ? '日時と数値を自動セットしました' : '数値を一部セットしました（確認してください）');
+                } else {
+                    document.getElementById('input-sys').focus();
+                    setAiStatus('error', '数値の自動検出ができませんでした', `${dateInfo}\n${result.error || ''}\n上の写真プレビューを見ながら、数値を入力してください。`, result.previewUrl);
+                    showToast('日時をセットしました（数値は写真を見ながら入力できます）');
+                }
+            } catch (err) {
+                console.error("Photo processing error:", err);
+                setAiStatus('error', '画像の処理中にエラーが発生しました', err.message);
+                showToast('画像の読み取りに失敗しました');
+            } finally {
+                btnText.textContent = originalText;
+                event.target.value = '';
+            }
+        }
+
+        function openModalAndProcessPhoto(event) {
+            openModal();
+            processPhoto(event);
+        }
+
+        // ==========================================
+        // UI レンダリング & CSVエクスポート (維持項目)
+        // ==========================================
+        function getBpStatus(sys, dia) {
+            if (!sys || !dia) return { label: '-', color: 'bg-slate-100 text-slate-500' };
+            if (sys < 115 && dia < 75) return { label: '正常', color: 'bg-emerald-100 text-emerald-700' };
+            if (sys < 125 && dia < 75) return { label: '正常高', color: 'bg-teal-100 text-teal-700' };
+            if (sys < 135 && dia < 85) return { label: '高値', color: 'bg-amber-100 text-amber-700' };
+            return { label: '高血圧', color: 'bg-rose-100 text-rose-700' };
+        }
+
+        function renderList() {
+            const list = document.getElementById('record-list');
+            const countEl = document.getElementById('record-count');
+            if (countEl) countEl.textContent = `${records.length}件`;
+            if (!list) return;
+
+            list.innerHTML = '';
+            
+            if (records.length === 0) {
+                list.innerHTML = `
+                    <div class="text-center py-12 px-4 bg-white rounded-2xl border border-slate-200 shadow-2xs">
+                        <div class="w-12 h-12 bg-rose-50 text-rose-400 rounded-full flex items-center justify-center mx-auto mb-3">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                            </svg>
+                        </div>
+                        <div class="text-sm font-bold text-slate-700 mb-1">記録がありません</div>
+                        <div class="text-xs text-slate-400">上の写真ボタンまたは右下の＋ボタンから<br>毎日の血圧を記録しましょう。</div>
+                    </div>
+                `;
+                updateStats();
+                return;
+            }
+
+            // 新しい順（降順）にソート
+            records.sort((a, b) => {
+                const dtA = `${a.date || ''} ${a.time || ''}`;
+                const dtB = `${b.date || ''} ${b.time || ''}`;
+                return dtB.localeCompare(dtA);
+            });
+
+            records.forEach(rec => {
+                const status = getBpStatus(Number(rec.sys), Number(rec.dia));
+                let displayDate = `${rec.date || ''} ${rec.time || ''}`;
+                try {
+                    const dateObj = new Date(`${rec.date}T${rec.time}`);
+                    if (!isNaN(dateObj)) {
+                        displayDate = `${dateObj.getMonth()+1}/${dateObj.getDate()} ${rec.time}`;
+                    }
+                } catch(e) {}
+                
+                const card = document.createElement('div');
+                card.className = "bg-white p-3.5 rounded-2xl shadow-xs border border-slate-200 flex items-center justify-between";
+                card.innerHTML = `
+                    <div class="flex-1">
+                        <div class="flex items-center gap-2 mb-1">
+                            <span class="text-xs font-bold text-slate-500">${displayDate}</span>
+                            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${status.color}">${status.label}</span>
+                        </div>
+                        <div class="flex items-end gap-3">
+                            <div class="flex items-baseline gap-1">
+                                <span class="text-2xl font-black text-slate-900">${rec.sys}</span>
+                                <span class="text-sm font-bold text-slate-300">/</span>
+                                <span class="text-2xl font-black text-slate-900">${rec.dia}</span>
+                                <span class="text-[10px] font-bold text-slate-400 ml-0.5">mmHg</span>
+                            </div>
+                            <div class="text-xs font-bold text-slate-500 mb-1 flex items-center gap-1">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-rose-500" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd" d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z" clip-rule="evenodd" />
+                                </svg>
+                                <span>${rec.pulse}</span>
+                                <span class="text-[10px] text-slate-400 font-normal">bpm</span>
+                            </div>
+                        </div>
+                        ${rec.memo ? `<div class="mt-1.5 text-xs text-slate-600 bg-slate-50 px-2.5 py-1 rounded-md inline-block break-all border border-slate-100">${escapeHtml(rec.memo)}</div>` : ''}
+                    </div>
+                    <button onclick="deleteRecord('${rec.id}')" title="削除" class="p-2 ml-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-full active:scale-90 transition">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
+                        </svg>
+                    </button>
+                `;
+                list.appendChild(card);
+            });
+            updateStats();
+        }
+
+        function escapeHtml(str) {
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        function addRecord(e) {
+            e.preventDefault();
+            const date = document.getElementById('input-date').value;
+            const time = document.getElementById('input-time').value;
+            const sys = Number(document.getElementById('input-sys').value);
+            const dia = Number(document.getElementById('input-dia').value);
+            const pulse = Number(document.getElementById('input-pulse').value);
+            const memo = document.getElementById('input-memo').value;
+
+            if (!date || !time || !sys || !dia) {
+                showToast('最高血圧と最低血圧を入力してください');
+                return;
+            }
+
+            const newId = String(Date.now());
+            const newRecord = { id: newId, date, time, sys, dia, pulse: pulse || 0, memo };
+
+            records.unshift(newRecord);
+            saveRecordsToStorage();
+            renderList();
+
+            document.getElementById('input-sys').value = '';
+            document.getElementById('input-dia').value = '';
+            document.getElementById('input-pulse').value = '';
+            document.getElementById('input-memo').value = '';
+            closeModal();
+            showToast('記録を保存しました');
+        }
+
+        function deleteRecord(id) {
+            if (!confirm("この記録を削除しますか？")) return;
+            records = records.filter(r => String(r.id) !== String(id));
+            saveRecordsToStorage();
+            renderList();
+            showToast('記録を削除しました');
+        }
+
+        function updateStats() {
+            const valid = records.filter(r => r.sys && r.dia);
+            if (valid.length === 0) {
+                document.getElementById('stat-sys').textContent = '-';
+                document.getElementById('stat-dia').textContent = '-';
+                document.getElementById('stat-pulse').textContent = '-';
+                return;
+            }
+            document.getElementById('stat-sys').textContent = Math.round(valid.reduce((sum, r) => sum + Number(r.sys), 0) / valid.length);
+            document.getElementById('stat-dia').textContent = Math.round(valid.reduce((sum, r) => sum + Number(r.dia), 0) / valid.length);
+            
+            const validPulse = records.filter(r => r.pulse && Number(r.pulse) > 0);
+            if (validPulse.length > 0) {
+                document.getElementById('stat-pulse').textContent = Math.round(validPulse.reduce((sum, r) => sum + Number(r.pulse), 0) / validPulse.length);
+            } else {
+                document.getElementById('stat-pulse').textContent = '-';
+            }
+        }
+
+        // CSVエクスポート機能（維持項目・Excel対応UTF-8 BOM付き）
+        function exportRecordsToCsv() {
+            if (!records || records.length === 0) {
+                showToast('エクスポートする記録がありません');
+                return;
+            }
+
+            const headers = ['日付', '時刻', '最高血圧(SYS)', '最低血圧(DIA)', '脈拍(PULSE)', '状態', 'メモ'];
+            const rows = records.map(r => {
+                const st = getBpStatus(Number(r.sys), Number(r.dia));
+                return [
+                    r.date || '',
+                    r.time || '',
+                    r.sys || '',
+                    r.dia || '',
+                    r.pulse || '',
+                    st.label || '',
+                    `"${(r.memo || '').replace(/"/g, '""')}"`
+                ].join(',');
+            });
+
+            // Excelで文字化けしないようUTF-8 BOM (\uFEFF) を付加
+            const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\r\n');
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+
+            const now = new Date();
+            const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+            link.setAttribute('href', url);
+            link.setAttribute('download', `blood_pressure_${dateStr}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            showToast('CSVファイルを書き出しました');
+        }
+
+        // ==========================================
+        // モーダル & トースト操作
+        // ==========================================
+        const modal = document.getElementById('add-modal');
+        const modalContent = document.getElementById('modal-content');
+        const backdrop = document.getElementById('modal-backdrop');
+
+        function openModal() {
+            document.getElementById('ai-status-box').classList.add('hidden');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            requestAnimationFrame(() => {
+                backdrop.classList.remove('opacity-0');
+                backdrop.classList.add('opacity-100');
+                modalContent.classList.remove('modal-enter');
+                modalContent.classList.add('modal-enter-active');
+            });
+        }
+
+        function closeModal() {
+            backdrop.classList.remove('opacity-100');
+            backdrop.classList.add('opacity-0');
+            modalContent.classList.remove('modal-enter-active');
+            modalContent.classList.add('modal-exit-active');
+            
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+                modalContent.classList.remove('modal-exit-active');
+                modalContent.classList.add('modal-enter');
+            }, 300);
+        }
+
+        let toastTimeout;
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            document.getElementById('toast-message').textContent = message;
+            toast.classList.remove('-translate-y-20', 'opacity-0');
+            clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => {
+                toast.classList.add('-translate-y-20', 'opacity-0');
+            }, 3000);
+        }
+
+        function openSettingsModal() {
+            const savedKey = localStorage.getItem('gemini_api_key') || '';
+            document.getElementById('gemini-api-key-input').value = savedKey;
+            const sModal = document.getElementById('settings-modal');
+            sModal.classList.remove('hidden');
+            sModal.classList.add('flex');
+        }
+
+        function closeSettingsModal() {
+            const sModal = document.getElementById('settings-modal');
+            sModal.classList.add('hidden');
+            sModal.classList.remove('flex');
+        }
+
+        function saveApiKey() {
+            const key = document.getElementById('gemini-api-key-input').value.trim();
+            if (key) {
+                localStorage.setItem('gemini_api_key', key);
+                showToast('Gemini APIキーを保存しました');
+            } else {
+                localStorage.removeItem('gemini_api_key');
+                showToast('APIキーを解除しました（無料ローカルOCR使用）');
+            }
+            closeSettingsModal();
+        }
+
+        // グローバル公開
+        window.openModal = openModal;
+        window.closeModal = closeModal;
+        window.openSettingsModal = openSettingsModal;
+        window.closeSettingsModal = closeSettingsModal;
+        window.saveApiKey = saveApiKey;
+        window.processPhoto = processPhoto;
+        window.openModalAndProcessPhoto = openModalAndProcessPhoto;
+        window.addRecord = addRecord;
+        window.deleteRecord = deleteRecord;
+        window.exportRecordsToCsv = exportRecordsToCsv;
+        window.adjustValue = adjustValue;
+        window.setPhotoZoom = setPhotoZoom;
+        window.resetPhotoZoom = resetPhotoZoom;
+    </script>
+</body>
+</html>
